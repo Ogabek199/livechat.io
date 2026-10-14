@@ -41,22 +41,6 @@ GoogleService-Info.plist
 .firebase/
 .firebaserc.local
 
-# Agent / AI tooling — NEVER push
-.cursor/
-.agents/
-.agent/
-.claude/
-.codex/
-.continue/
-.windsurf/
-.gemini/
-AGENTS.md
-CLAUDE.md
-.cursorrules
-*.agent.md
-agent-transcripts/
-mcps/
-
 # Temp / coverage
 coverage/
 tmp/
