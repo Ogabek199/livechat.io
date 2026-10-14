@@ -5,7 +5,6 @@ const ALLOWED_PREFIXES = [
   '/__nuxt',
   '/_ipx',
   '/api/',
-  '/ws',
   '/favicon',
   '/robots.txt',
 ]
@@ -57,7 +56,7 @@ export default defineEventHandler((event) => {
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: blob: https://*.googleusercontent.com",
       "media-src 'self' blob:",
-      "connect-src 'self' ws: wss: https://fonts.googleapis.com https://fonts.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com https://*.googleapis.com https://*.firebaseio.com https://*.firebasestorage.app",
+      "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://firebaseinstallations.googleapis.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebasedatabase.app wss://*.firebasedatabase.app https://*.firebasestorage.app",
       "frame-src 'self' https://accounts.google.com https://*.firebaseapp.com https://*.google.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",

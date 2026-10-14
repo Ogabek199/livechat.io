@@ -1,0 +1,34 @@
+{
+  "rules": {
+    "waiting": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && (auth.uid == $uid || (data.exists() && !data.child('claimedBy').exists() && newData.child('claimedBy').val() == auth.uid))",
+        ".validate": "!newData.exists() || (newData.hasChild('name') && newData.hasChild('ts') && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('ts').isNumber())"
+      }
+    },
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null && (data.child('a').val() == auth.uid || data.child('b').val() == auth.uid)",
+        ".write": "auth != null && ((!data.exists() && newData.child('a').val() == auth.uid && newData.hasChildren(['a','b','aName','bName','createdAt','status'])) || (data.exists() && (data.child('a').val() == auth.uid || data.child('b').val() == auth.uid)))",
+        "signals": {
+          "$sid": {
+            ".write": "auth != null && newData.child('from').val() == auth.uid && newData.hasChild('data') && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid)",
+            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber()"
+          }
+        },
+        "chat": {
+          "$mid": {
+            ".write": "auth != null && newData.child('from').val() == auth.uid && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid)",
+            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber() && ((!newData.hasChild('text') && newData.hasChild('stickerId') && newData.child('stickerId').isString()) || (newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500))"
+          }
+        },
+        "presence": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid)"
+          }
+        }
+      }
+    }
+  }
+}

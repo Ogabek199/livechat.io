@@ -9,12 +9,15 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
+  onAuthStateChanged,
   type Auth,
   type User,
 } from 'firebase/auth'
+import { getDatabase, type Database } from 'firebase/database'
 
 let app: FirebaseApp | null = null
 let auth: Auth | null = null
+let db: Database | null = null
 let persistenceReady: Promise<void> | null = null
 
 function readFirebasePublic() {
@@ -27,12 +30,22 @@ function readFirebasePublic() {
   const messagingSenderId = String(c.firebaseMessagingSenderId || '').trim()
   const appId = String(c.firebaseAppId || '').trim()
   const measurementId = String(c.firebaseMeasurementId || '').trim()
+  const databaseURL = String(c.firebaseDatabaseURL || '').trim()
 
-  return { apiKey, projectId, authDomain, storageBucket, messagingSenderId, appId, measurementId }
+  return {
+    apiKey,
+    projectId,
+    authDomain,
+    storageBucket,
+    messagingSenderId,
+    appId,
+    measurementId,
+    databaseURL,
+  }
 }
 
-export function getFirebaseAuth(): Auth {
-  if (auth) return auth
+function ensureApp(): FirebaseApp {
+  if (app) return app
   const c = readFirebasePublic()
 
   if (!c.apiKey || !c.projectId || !c.appId) {
@@ -54,12 +67,45 @@ export function getFirebaseAuth(): Auth {
     messagingSenderId: c.messagingSenderId,
     appId: c.appId,
     measurementId: c.measurementId || undefined,
+    databaseURL: c.databaseURL || `https://${c.projectId}-default-rtdb.firebaseio.com`,
   }
 
   app = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig)
-  auth = getAuth(app)
+  return app
+}
+
+export function getFirebaseAuth(): Auth {
+  if (auth) return auth
+  auth = getAuth(ensureApp())
   persistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => {})
   return auth
+}
+
+export function getFirebaseDatabase(): Database {
+  if (db) return db
+  ensureApp()
+  getFirebaseAuth()
+  db = getDatabase(app!)
+  return db
+}
+
+/** Cookie sessiya bor, lekin Firebase Auth hali restore bo‘lmagan bo‘lishi mumkin */
+export function waitForFirebaseUser(timeoutMs = 8000): Promise<User> {
+  const a = getFirebaseAuth()
+  if (a.currentUser) return Promise.resolve(a.currentUser)
+
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => {
+      unsub()
+      reject(new Error('Firebase sessiya topilmadi — qayta kiring'))
+    }, timeoutMs)
+    const unsub = onAuthStateChanged(a, (u) => {
+      if (!u) return
+      clearTimeout(t)
+      unsub()
+      resolve(u)
+    })
+  })
 }
 
 async function readyAuth() {

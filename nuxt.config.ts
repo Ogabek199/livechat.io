@@ -18,9 +18,6 @@ export default defineNuxtConfig({
   },
   nitro: {
     preset: 'vercel',
-    experimental: {
-      websocket: true,
-    },
   },
   // Bo'sh default — Vercel/local env `NUXT_*` orqali runtime'da to'ldiriladi
   runtimeConfig: {
@@ -33,17 +30,17 @@ export default defineNuxtConfig({
       firebaseMessagingSenderId: '',
       firebaseAppId: '',
       firebaseMeasurementId: '',
+      firebaseDatabaseURL: '',
     },
   },
   vite: {
     optimizeDeps: {
-      include: ['firebase/app', 'firebase/auth', 'jose'],
+      include: ['firebase/app', 'firebase/auth', 'firebase/database', 'jose'],
     },
   },
   routeRules: {
     '/app': { ssr: false, headers: { 'Cache-Control': 'no-store' } },
     '/api/**': { headers: { 'Cache-Control': 'no-store' } },
-    '/ws': { cors: false },
   },
   app: {
     head: {
