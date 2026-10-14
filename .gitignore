@@ -39,6 +39,7 @@ GoogleService-Info.plist
 
 # Firebase local
 .firebase/
+.firebaserc
 .firebaserc.local
 
 # Temp / coverage
