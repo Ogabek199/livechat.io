@@ -17,22 +17,43 @@ let app: FirebaseApp | null = null
 let auth: Auth | null = null
 let persistenceReady: Promise<void> | null = null
 
+function readFirebasePublic() {
+  const c = useRuntimeConfig().public
+  // Vercel ba'zan nomlarni string sifatida beradi — trim
+  const apiKey = String(c.firebaseApiKey || '').trim()
+  const projectId = String(c.firebaseProjectId || '').trim()
+  const authDomain = String(c.firebaseAuthDomain || '').trim()
+  const storageBucket = String(c.firebaseStorageBucket || '').trim()
+  const messagingSenderId = String(c.firebaseMessagingSenderId || '').trim()
+  const appId = String(c.firebaseAppId || '').trim()
+  const measurementId = String(c.firebaseMeasurementId || '').trim()
+
+  return { apiKey, projectId, authDomain, storageBucket, messagingSenderId, appId, measurementId }
+}
+
 export function getFirebaseAuth(): Auth {
   if (auth) return auth
-  const config = useRuntimeConfig().public
+  const c = readFirebasePublic()
 
-  if (!config.firebaseApiKey || !config.firebaseProjectId) {
-    throw new Error('Firebase sozlamalari topilmadi (.env ni tekshiring)')
+  if (!c.apiKey || !c.projectId || !c.appId) {
+    const missing = [
+      !c.apiKey && 'NUXT_PUBLIC_FIREBASE_API_KEY',
+      !c.projectId && 'NUXT_PUBLIC_FIREBASE_PROJECT_ID',
+      !c.appId && 'NUXT_PUBLIC_FIREBASE_APP_ID',
+    ].filter(Boolean)
+    throw new Error(
+      `Firebase sozlamalari topilmadi. Vercel → Settings → Environment Variables ga qo'shing: ${missing.join(', ')}`,
+    )
   }
 
   const firebaseConfig = {
-    apiKey: config.firebaseApiKey,
-    authDomain: config.firebaseAuthDomain,
-    projectId: config.firebaseProjectId,
-    storageBucket: config.firebaseStorageBucket,
-    messagingSenderId: config.firebaseMessagingSenderId,
-    appId: config.firebaseAppId,
-    measurementId: config.firebaseMeasurementId || undefined,
+    apiKey: c.apiKey,
+    authDomain: c.authDomain || `${c.projectId}.firebaseapp.com`,
+    projectId: c.projectId,
+    storageBucket: c.storageBucket || `${c.projectId}.appspot.com`,
+    messagingSenderId: c.messagingSenderId,
+    appId: c.appId,
+    measurementId: c.measurementId || undefined,
   }
 
   app = getApps().length ? getApps()[0]! : initializeApp(firebaseConfig)
@@ -113,7 +134,7 @@ export function firebaseAuthErrorMessage(err: unknown): string {
     case 'auth/network-request-failed':
       return 'Internet aloqasi yo‘q'
     case 'auth/unauthorized-domain':
-      return 'Domain Firebase’da ruxsat etilmagan (localhost qo‘shing)'
+      return 'Domain Firebase’da ruxsat etilmagan (localhost + vercel.app qo‘shing)'
     case 'auth/operation-not-allowed':
       return 'Google kirish Firebase Console’da yoqilmagan'
     case 'auth/too-many-requests':
