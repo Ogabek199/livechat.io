@@ -19,14 +19,59 @@
         },
         "chat": {
           "$mid": {
-            ".write": "auth != null && newData.child('from').val() == auth.uid && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid)",
-            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber() && ((!newData.hasChild('text') && newData.hasChild('stickerId') && newData.child('stickerId').isString()) || (newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500))"
+            ".write": "auth != null && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid) && ((!data.exists() && newData.child('from').val() == auth.uid) || (data.exists() && data.child('from').val() == auth.uid && newData.child('from').val() == data.child('from').val() && newData.child('ts').val() == data.child('ts').val() && !data.hasChild('stickerId') && newData.hasChild('text') && newData.hasChild('editedAt')))",
+            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber() && ((!newData.hasChild('text') && newData.hasChild('stickerId') && newData.child('stickerId').isString()) || (newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500)) && (!newData.hasChild('editedAt') || newData.child('editedAt').isNumber())"
           }
         },
         "presence": {
           "$uid": {
             ".write": "auth != null && auth.uid == $uid && (root.child('rooms').child($roomId).child('a').val() == auth.uid || root.child('rooms').child($roomId).child('b').val() == auth.uid)"
           }
+        }
+      }
+    },
+    "meetCodes": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('hostId').val() == auth.uid && newData.hasChildren(['roomId','hostId','createdAt'])) || (data.exists() && data.child('hostId').val() == auth.uid))",
+        ".validate": "!newData.exists() || (newData.child('roomId').isString() && newData.child('hostId').isString() && newData.child('createdAt').isNumber())"
+      }
+    },
+    "privateMeets": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.child('hostId').val() == auth.uid && newData.hasChildren(['code','hostId','hostName','createdAt','status'])) || (data.exists() && data.child('hostId').val() == auth.uid))",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && (root.child('privateMeets').child($roomId).child('hostId').val() == auth.uid || (auth.uid == $uid && !data.exists() && newData.child('role').val() == 'host'))",
+            ".validate": "newData.hasChildren(['name','role','joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('joinedAt').isNumber()"
+          }
+        },
+        "requests": {
+          "$uid": {
+            ".write": "auth != null && (auth.uid == $uid || root.child('privateMeets').child($roomId).child('hostId').val() == auth.uid)",
+            ".validate": "!newData.exists() || (newData.hasChild('name') && newData.hasChild('ts') && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('ts').isNumber())"
+          }
+        },
+        "signals": {
+          "$sid": {
+            ".write": "auth != null && newData.child('from').val() == auth.uid && newData.hasChild('data') && root.child('privateMeets').child($roomId).child('members').child(auth.uid).exists()",
+            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber()"
+          }
+        },
+        "chat": {
+          "$mid": {
+            ".write": "auth != null && root.child('privateMeets').child($roomId).child('members').child(auth.uid).exists() && ((!data.exists() && newData.child('from').val() == auth.uid) || (data.exists() && data.child('from').val() == auth.uid && newData.child('from').val() == data.child('from').val() && newData.child('ts').val() == data.child('ts').val() && !data.hasChild('stickerId') && newData.hasChild('text') && newData.hasChild('editedAt')))",
+            ".validate": "newData.child('from').isString() && newData.child('ts').isNumber() && ((!newData.hasChild('text') && newData.hasChild('stickerId') && newData.child('stickerId').isString()) || (newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500)) && (!newData.hasChild('editedAt') || newData.child('editedAt').isNumber())"
+          }
+        },
+        "presence": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid && root.child('privateMeets').child($roomId).child('members').child(auth.uid).exists()"
+          }
+        },
+        "status": {
+          ".write": "auth != null && root.child('privateMeets').child($roomId).child('hostId').val() == auth.uid"
         }
       }
     }

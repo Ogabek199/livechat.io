@@ -1,19 +1,32 @@
 const PUBLIC = new Set(['/login', '/terms', '/privacy'])
 const ALLOWED = new Set(['/', '/login', '/terms', '/privacy', '/app'])
 
+function isMeetPath(path: string) {
+  return /^\/meet\/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}$/.test(path)
+}
+
+function safeNext(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  if (isMeetPath(raw)) return raw
+  return null
+}
+
 export default defineNuxtRouteMiddleware(async (to) => {
-  // URL path himoya: faqat ruxsat etilgan marshrutlar
   const path = to.path.replace(/\/+$/, '') || '/'
-  if (!ALLOWED.has(path) && !path.startsWith('/api')) {
-    // catch-all [...slug] ham kelishi mumkin — bosh sahifaga
+  const meet = isMeetPath(path)
+
+  if (!ALLOWED.has(path) && !path.startsWith('/api') && !meet) {
     if (to.name !== 'slug') {
       return navigateTo('/', { replace: true })
     }
   }
 
-  // Query orqali room/user id o'tkazishni e'tiborsiz qoldiramiz (URL da sessiya yo'q)
   if (to.query.room || to.query.user || to.query.id || to.query.token) {
-    return navigateTo({ path: path === '/login' ? '/login' : path, query: {} }, { replace: true })
+    const nextQ = safeNext(to.query.next)
+    return navigateTo(
+      { path: path === '/login' ? '/login' : path, query: nextQ ? { next: nextQ } : {} },
+      { replace: true },
+    )
   }
 
   const { user, ready, fetchMe } = useAuth()
@@ -26,8 +39,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   const isPublic = PUBLIC.has(path)
 
-  if (!user.value && path === '/app') {
-    return navigateTo('/login', { replace: true })
+  if (!user.value && (path === '/app' || meet)) {
+    return navigateTo(
+      { path: '/login', query: meet ? { next: path } : {} },
+      { replace: true },
+    )
   }
 
   if (!user.value && !isPublic && path !== '/') {
@@ -35,6 +51,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   if (user.value && path === '/login') {
-    return navigateTo('/app', { replace: true })
+    const next = safeNext(to.query.next) || '/app'
+    return navigateTo(next, { replace: true })
   }
 })

@@ -27,7 +27,8 @@ export default defineEventHandler((event) => {
   }
 
   const isAsset = ALLOWED_PREFIXES.some((p) => path === p || path.startsWith(p))
-  const isPage = ALLOWED_EXACT.has(path)
+  const isMeet = /^\/meet\/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}\/?$/.test(path)
+  const isPage = ALLOWED_EXACT.has(path) || isMeet
 
   // API va assetlardan tashqari noma'lum pathlar — 404
   if (!isAsset && !isPage && !path.startsWith('/api/')) {

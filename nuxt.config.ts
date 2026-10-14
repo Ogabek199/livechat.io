@@ -40,6 +40,7 @@ export default defineNuxtConfig({
   },
   routeRules: {
     '/app': { ssr: false, headers: { 'Cache-Control': 'no-store' } },
+    '/meet/**': { ssr: false, headers: { 'Cache-Control': 'no-store' } },
     '/api/**': { headers: { 'Cache-Control': 'no-store' } },
   },
   app: {

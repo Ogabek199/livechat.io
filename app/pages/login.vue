@@ -3,13 +3,22 @@ const { loginAnonymous, loginWithGoogle, finishGoogleRedirect, user } = useAuth(
 const { error: toastError } = useToast()
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref<'google' | 'anon' | null>(null)
+
+function afterLoginPath() {
+  const next = route.query.next
+  if (typeof next === 'string' && /^\/meet\/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}$/.test(next)) {
+    return next
+  }
+  return '/app'
+}
 
 watch(
   user,
   (u) => {
-    if (u) router.replace('/app')
+    if (u) router.replace(afterLoginPath())
   },
   { immediate: true },
 )
@@ -19,7 +28,7 @@ onMounted(async () => {
     const u = await finishGoogleRedirect()
     if (u) {
       loading.value = 'google'
-      await router.replace('/app')
+      await router.replace(afterLoginPath())
     }
   } catch {
     // toast shown
@@ -33,7 +42,7 @@ async function onGoogle() {
   loading.value = 'google'
   try {
     await loginWithGoogle()
-    await router.push('/app')
+    await router.push(afterLoginPath())
   } catch {
     // toast already shown — loadingni tozalash
   } finally {
@@ -47,7 +56,7 @@ async function onAnonymous() {
   loading.value = 'anon'
   try {
     await loginAnonymous()
-    await router.push('/app')
+    await router.push(afterLoginPath())
   } catch {
     // toast
   } finally {

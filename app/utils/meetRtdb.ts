@@ -1,6 +1,7 @@
 import {
   get,
   onChildAdded,
+  onChildChanged,
   onDisconnect,
   onValue,
   push,
@@ -23,10 +24,12 @@ export type MeetMatched = {
 }
 
 export type MeetChatPayload = {
+  id: string
   text?: string
   stickerId?: string
   from: string
   ts: number
+  editedAt?: number
   echo?: boolean
 }
 
@@ -56,6 +59,10 @@ function shouldClaimOther(otherId: string, otherTs: number, myId: string, myTs: 
   return otherId < myId
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 export class MeetRtdbSession {
   private db: Database
   private uid: string
@@ -64,6 +71,7 @@ export class MeetRtdbSession {
   private myWaitTs: number | null = null
   private matched = false
   private claiming = false
+  private joining = false
   private unsubs: Unsubscribe[] = []
   private disconnectOps: Array<{ cancel: () => Promise<void> }> = []
 
@@ -72,6 +80,7 @@ export class MeetRtdbSession {
   onPartnerLeft: (() => void) | null = null
   onSignal: ((data: Record<string, unknown>) => void) | null = null
   onChat: ((msg: MeetChatPayload) => void) | null = null
+  onChatUpdated: ((msg: MeetChatPayload) => void) | null = null
 
   constructor(uid: string, name: string) {
     this.db = getFirebaseDatabase()
@@ -110,13 +119,33 @@ export class MeetRtdbSession {
     await remove(ref(this.db, `waiting/${this.uid}`)).catch(() => {})
   }
 
+  /** Room tayyor bo‘lguncha kutish (claim → room race uchun) */
+  private async waitForRoom(roomId: string, attempts = 12): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+      const snap = await get(ref(this.db, `rooms/${roomId}`))
+      if (snap.exists()) return true
+      await sleep(150 + i * 50)
+    }
+    return false
+  }
+
   private async claimPartner(otherId: string, other: WaitingEntry): Promise<boolean> {
-    if (this.matched || this.claiming || this.roomId) return false
+    if (this.matched || this.claiming || this.roomId || this.joining) return false
     if (!shouldClaimOther(otherId, other.ts || 0, this.uid, this.myWaitTs)) return false
 
     this.claiming = true
+    const roomId = newRoomId()
     try {
-      const roomId = newRoomId()
+      // Avval room — partner claimedBy ni ko‘rganda presence yozishi mumkin bo‘lsin
+      await set(ref(this.db, `rooms/${roomId}`), {
+        a: this.uid,
+        b: otherId,
+        aName: this.name,
+        bName: other.name,
+        createdAt: Date.now(),
+        status: 'active',
+      })
+
       const result = await runTransaction(ref(this.db, `waiting/${otherId}`), (cur) => {
         if (!cur || typeof cur !== 'object') return
         const c = cur as WaitingEntry
@@ -131,21 +160,19 @@ export class MeetRtdbSession {
       })
 
       const val = result.snapshot.val() as WaitingEntry | null
-      if (!result.committed || !val || val.claimedBy !== this.uid || !val.roomId) return false
+      if (!result.committed || !val || val.claimedBy !== this.uid || val.roomId !== roomId) {
+        await remove(ref(this.db, `rooms/${roomId}`)).catch(() => {})
+        return false
+      }
 
       this.matched = true
-      await set(ref(this.db, `rooms/${val.roomId}`), {
-        a: this.uid,
-        b: otherId,
-        aName: this.name,
-        bName: other.name,
-        createdAt: Date.now(),
-        status: 'active',
-      })
-
       await remove(ref(this.db, `waiting/${this.uid}`)).catch(() => {})
-      await this.enterRoom(val.roomId, { id: otherId, name: other.name }, true)
+      await this.enterRoom(roomId, { id: otherId, name: other.name }, true)
       return true
+    } catch {
+      await remove(ref(this.db, `rooms/${roomId}`)).catch(() => {})
+      this.matched = false
+      return false
     } finally {
       this.claiming = false
     }
@@ -165,6 +192,37 @@ export class MeetRtdbSession {
     return false
   }
 
+  private async acceptClaim(v: WaitingEntry) {
+    if (this.matched || this.roomId || this.joining) return
+    if (!v.claimedBy || !v.roomId) return
+
+    this.joining = true
+    this.matched = true
+    const roomId = v.roomId
+    const partner: MeetPartner = {
+      id: v.claimedBy,
+      name: String(v.claimerName || 'User').slice(0, 40),
+    }
+
+    try {
+      await this.clearDisconnect()
+      await remove(ref(this.db, `waiting/${this.uid}`)).catch(() => {})
+
+      const ready = await this.waitForRoom(roomId)
+      if (!ready) throw new Error('room-not-ready')
+
+      await this.enterRoom(roomId, partner, false)
+    } catch {
+      this.matched = false
+      this.joining = false
+      this.roomId = null
+      // Qayta navbatga
+      void this.find().catch(() => {})
+    } finally {
+      this.joining = false
+    }
+  }
+
   async find() {
     await this.leaveRoomLocal(false)
     await this.leaveQueue()
@@ -172,9 +230,9 @@ export class MeetRtdbSession {
     await this.clearDisconnect()
     this.matched = false
     this.claiming = false
+    this.joining = false
     this.myWaitTs = null
 
-    // Avval navbatdagi birovni claim qilishga urinish
     if (await this.scanAndClaim()) return
 
     const myTs = Date.now()
@@ -187,26 +245,18 @@ export class MeetRtdbSession {
 
     this.onSearching?.()
 
-    // Meni claim qilishdi
     this.track(
-      onValue(myRef, async (snap) => {
-        if (this.matched || this.roomId) return
+      onValue(myRef, (snap) => {
+        if (this.matched || this.roomId || this.joining) return
         const v = snap.val() as WaitingEntry | null
         if (!v?.claimedBy || !v.roomId) return
-        this.matched = true
-        const partner: MeetPartner = {
-          id: v.claimedBy,
-          name: String(v.claimerName || 'User').slice(0, 40),
-        }
-        await remove(myRef).catch(() => {})
-        await this.enterRoom(v.roomId, partner, false)
+        void this.acceptClaim(v)
       }),
     )
 
-    // Boshqa kutuvchi paydo bo‘lsa — claim (ikki user bir vaqtda kirganda race uchun)
     this.track(
       onChildAdded(ref(this.db, 'waiting'), (snap) => {
-        if (this.matched || this.roomId) return
+        if (this.matched || this.roomId || this.joining) return
         const otherId = snap.key
         if (!otherId || otherId === this.uid) return
         const other = snap.val() as WaitingEntry | null
@@ -215,7 +265,6 @@ export class MeetRtdbSession {
       }),
     )
 
-    // get() va set() orasidagi race: yana bir marta skan
     if (await this.scanAndClaim()) return
   }
 
@@ -251,14 +300,26 @@ export class MeetRtdbSession {
     )
 
     const chatRef = ref(this.db, `rooms/${roomId}/chat`)
+    const mapChat = (snap: { key: string | null; val: () => unknown }): MeetChatPayload | null => {
+      const id = snap.key
+      const v = snap.val() as Omit<MeetChatPayload, 'id' | 'echo'> | null
+      if (!id || !v || typeof v.from !== 'string') return null
+      return {
+        ...v,
+        id,
+        echo: v.from === this.uid,
+      }
+    }
     this.track(
       onChildAdded(chatRef, (snap) => {
-        const v = snap.val() as MeetChatPayload | null
-        if (!v || typeof v.from !== 'string') return
-        this.onChat?.({
-          ...v,
-          echo: v.from === this.uid,
-        })
+        const msg = mapChat(snap)
+        if (msg) this.onChat?.(msg)
+      }),
+    )
+    this.track(
+      onChildChanged(chatRef, (snap) => {
+        const msg = mapChat(snap)
+        if (msg) this.onChatUpdated?.(msg)
       }),
     )
 
@@ -284,6 +345,21 @@ export class MeetRtdbSession {
     return true
   }
 
+  async editChat(messageId: string, text: string) {
+    if (!this.roomId || !messageId) return false
+    const msgRef = ref(this.db, `rooms/${this.roomId}/chat/${messageId}`)
+    const snap = await get(msgRef)
+    const cur = snap.val() as { from?: string; stickerId?: string; ts?: number } | null
+    if (!cur || cur.from !== this.uid || cur.stickerId || typeof cur.ts !== 'number') return false
+    await update(msgRef, {
+      text,
+      from: this.uid,
+      ts: cur.ts,
+      editedAt: Date.now(),
+    })
+    return true
+  }
+
   async sendSticker(stickerId: string) {
     if (!this.roomId) return false
     await push(ref(this.db, `rooms/${this.roomId}/chat`), {
@@ -298,6 +374,7 @@ export class MeetRtdbSession {
     const roomId = this.roomId
     this.roomId = null
     this.matched = false
+    this.joining = false
     this.myWaitTs = null
     this.clearListeners()
     await this.clearDisconnect()

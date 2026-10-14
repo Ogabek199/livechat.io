@@ -11,6 +11,7 @@ export type ChatMessage = {
   system?: boolean
   stickerId?: StickerId
   stickerEmoji?: string
+  edited?: boolean
 }
 
 type Partner = { id: string; name: string }
@@ -202,7 +203,7 @@ export function useMeet() {
         const emoji = stickerEmoji(msg.stickerId)
         if (!emoji) return
         messages.value.push({
-          id: `s_${msg.ts}_${Math.random().toString(36).slice(2, 6)}`,
+          id: msg.id,
           text: emoji,
           stickerId: msg.stickerId,
           stickerEmoji: emoji,
@@ -214,11 +215,26 @@ export function useMeet() {
       const text = safeDisplay(String(msg.text || ''))
       if (!text) return
       messages.value.push({
-        id: `m_${msg.ts}_${Math.random().toString(36).slice(2, 6)}`,
+        id: msg.id,
         text,
         fromMe: Boolean(msg.echo),
         time: nowTime(locale.value),
+        edited: Boolean(msg.editedAt),
       })
+    }
+
+    s.onChatUpdated = (msg) => {
+      if (msg.stickerId) return
+      const text = safeDisplay(String(msg.text || ''))
+      if (!text) return
+      const idx = messages.value.findIndex((m) => m.id === msg.id)
+      if (idx < 0) return
+      const prev = messages.value[idx]!
+      messages.value[idx] = {
+        ...prev,
+        text,
+        edited: true,
+      }
     }
   }
 
@@ -256,6 +272,20 @@ export function useMeet() {
     if (status.value !== 'in_call') return false
     void session.sendChat(clean)
     return true
+  }
+
+  async function editChat(messageId: string, text: string) {
+    const clean = sanitizeText(text, 500)
+    if (!clean || !session || !messageId) return false
+    if (status.value !== 'in_call') return false
+    const msg = messages.value.find((m) => m.id === messageId)
+    if (!msg || !msg.fromMe || msg.system || msg.stickerId) return false
+    try {
+      return await session.editChat(messageId, clean)
+    } catch {
+      toast.error(t('editFailed'))
+      return false
+    }
   }
 
   function sendSticker(stickerId: StickerId) {
@@ -322,6 +352,7 @@ export function useMeet() {
     remoteVideo,
     connect,
     sendChat,
+    editChat,
     sendSticker,
     nextPartner,
     toggleMic,
