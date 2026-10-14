@@ -35,8 +35,9 @@ async function onGoogle() {
     await loginWithGoogle()
     await router.push('/app')
   } catch {
-    // toast
+    // toast already shown — loadingni tozalash
   } finally {
+    // Redirect ketayotgan bo‘lsa ham 10s ichida xato chiqadi
     loading.value = null
   }
 }

@@ -132,16 +132,25 @@ export async function firebaseGoogle(): Promise<User> {
     return cred.user
   } catch (err) {
     const code = (err as { code?: string })?.code || ''
-    // Popup COOP/brauzer tomonidan buzilsa — redirect fallback
-    if (
-      code === 'auth/popup-blocked' ||
-      code === 'auth/popup-closed-by-user' ||
-      code === 'auth/cancelled-popup-request' ||
-      code === 'auth/internal-error'
-    ) {
+
+    // Foydalanuvchi oynani yopdi — redirect qilmaslik (loading qotib qolmasin)
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      throw err
+    }
+
+    // Popup bloklangan / COOP buzgan — redirect
+    if (code === 'auth/popup-blocked' || code === 'auth/internal-error') {
       await signInWithRedirect(a, provider)
-      // Sahifa yo‘naltiriladi — Promise hech qachon resolve bo‘lmasin
-      await new Promise(() => {})
+      // Brauzer Google’ga o‘tishi kerak; o‘tmasa — loadingni ochish uchun xato
+      await new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(
+            Object.assign(new Error('Google redirect ishlamadi — qayta urinib ko‘ring'), {
+              code: 'auth/redirect-failed',
+            }),
+          )
+        }, 10_000)
+      })
     }
     throw err
   }
@@ -174,9 +183,11 @@ export function firebaseAuthErrorMessage(err: unknown): string {
     case 'auth/popup-closed-by-user':
       return 'Kirish oynasi yopildi — qayta urinib ko‘ring'
     case 'auth/popup-blocked':
-      return 'Brauzer popupni blokladi — ruxsat bering'
+      return 'Brauzer popupni blokladi — ruxsat bering yoki qayta bosing'
     case 'auth/cancelled-popup-request':
       return 'Kirish bekor qilindi'
+    case 'auth/redirect-failed':
+      return 'Google sahifasiga o‘tib bo‘lmadi — qayta urinib ko‘ring'
     case 'auth/network-request-failed':
       return 'Internet aloqasi yo‘q'
     case 'auth/unauthorized-domain':

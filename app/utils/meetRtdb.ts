@@ -48,11 +48,22 @@ function newRoomId() {
   return `r_${b64}`
 }
 
+/** Yangiroq kutuvchi eskiroqni claim qiladi — ikkala tomon bir-birini claim qilmasin */
+function shouldClaimOther(otherId: string, otherTs: number, myId: string, myTs: number | null) {
+  if (myTs == null) return true
+  if (otherTs < myTs) return true
+  if (otherTs > myTs) return false
+  return otherId < myId
+}
+
 export class MeetRtdbSession {
   private db: Database
   private uid: string
   private name: string
   private roomId: string | null = null
+  private myWaitTs: number | null = null
+  private matched = false
+  private claiming = false
   private unsubs: Unsubscribe[] = []
   private disconnectOps: Array<{ cancel: () => Promise<void> }> = []
 
@@ -99,19 +110,12 @@ export class MeetRtdbSession {
     await remove(ref(this.db, `waiting/${this.uid}`)).catch(() => {})
   }
 
-  async find() {
-    await this.leaveRoomLocal(false)
-    await this.leaveQueue()
-    this.clearListeners()
-    await this.clearDisconnect()
+  private async claimPartner(otherId: string, other: WaitingEntry): Promise<boolean> {
+    if (this.matched || this.claiming || this.roomId) return false
+    if (!shouldClaimOther(otherId, other.ts || 0, this.uid, this.myWaitTs)) return false
 
-    const waitingSnap = await get(ref(this.db, 'waiting'))
-    const all = (waitingSnap.val() || {}) as Record<string, WaitingEntry>
-    const candidates = Object.entries(all)
-      .filter(([id, v]) => id !== this.uid && v && !v.claimedBy && typeof v.name === 'string')
-      .sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0))
-
-    for (const [otherId, other] of candidates) {
+    this.claiming = true
+    try {
       const roomId = newRoomId()
       const result = await runTransaction(ref(this.db, `waiting/${otherId}`), (cur) => {
         if (!cur || typeof cur !== 'object') return
@@ -127,8 +131,9 @@ export class MeetRtdbSession {
       })
 
       const val = result.snapshot.val() as WaitingEntry | null
-      if (!result.committed || !val || val.claimedBy !== this.uid || !val.roomId) continue
+      if (!result.committed || !val || val.claimedBy !== this.uid || !val.roomId) return false
 
+      this.matched = true
       await set(ref(this.db, `rooms/${val.roomId}`), {
         a: this.uid,
         b: otherId,
@@ -138,25 +143,57 @@ export class MeetRtdbSession {
         status: 'active',
       })
 
-      // Kutayotgan tomon claimedBy ni o'zi o'qiydi va waiting ni tozalaydi
       await remove(ref(this.db, `waiting/${this.uid}`)).catch(() => {})
-
       await this.enterRoom(val.roomId, { id: otherId, name: other.name }, true)
-      return
+      return true
+    } finally {
+      this.claiming = false
     }
+  }
 
+  private async scanAndClaim(): Promise<boolean> {
+    if (this.matched || this.roomId) return false
+    const waitingSnap = await get(ref(this.db, 'waiting'))
+    const all = (waitingSnap.val() || {}) as Record<string, WaitingEntry>
+    const candidates = Object.entries(all)
+      .filter(([id, v]) => id !== this.uid && v && !v.claimedBy && typeof v.name === 'string')
+      .sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0))
+
+    for (const [otherId, other] of candidates) {
+      if (await this.claimPartner(otherId, other)) return true
+    }
+    return false
+  }
+
+  async find() {
+    await this.leaveRoomLocal(false)
+    await this.leaveQueue()
+    this.clearListeners()
+    await this.clearDisconnect()
+    this.matched = false
+    this.claiming = false
+    this.myWaitTs = null
+
+    // Avval navbatdagi birovni claim qilishga urinish
+    if (await this.scanAndClaim()) return
+
+    const myTs = Date.now()
+    this.myWaitTs = myTs
     const myRef = ref(this.db, `waiting/${this.uid}`)
-    await set(myRef, { name: this.name, ts: Date.now() })
+    await set(myRef, { name: this.name, ts: myTs })
     const disc = onDisconnect(myRef)
     await disc.remove()
     this.disconnectOps.push(disc)
 
     this.onSearching?.()
 
+    // Meni claim qilishdi
     this.track(
       onValue(myRef, async (snap) => {
+        if (this.matched || this.roomId) return
         const v = snap.val() as WaitingEntry | null
         if (!v?.claimedBy || !v.roomId) return
+        this.matched = true
         const partner: MeetPartner = {
           id: v.claimedBy,
           name: String(v.claimerName || 'User').slice(0, 40),
@@ -165,12 +202,28 @@ export class MeetRtdbSession {
         await this.enterRoom(v.roomId, partner, false)
       }),
     )
+
+    // Boshqa kutuvchi paydo bo‘lsa — claim (ikki user bir vaqtda kirganda race uchun)
+    this.track(
+      onChildAdded(ref(this.db, 'waiting'), (snap) => {
+        if (this.matched || this.roomId) return
+        const otherId = snap.key
+        if (!otherId || otherId === this.uid) return
+        const other = snap.val() as WaitingEntry | null
+        if (!other || other.claimedBy || typeof other.name !== 'string') return
+        void this.claimPartner(otherId, other)
+      }),
+    )
+
+    // get() va set() orasidagi race: yana bir marta skan
+    if (await this.scanAndClaim()) return
   }
 
   private async enterRoom(roomId: string, partner: MeetPartner, initiator: boolean) {
     this.clearListeners()
     await this.clearDisconnect()
     this.roomId = roomId
+    this.myWaitTs = null
 
     const presenceRef = ref(this.db, `rooms/${roomId}/presence/${this.uid}`)
     await set(presenceRef, { online: true, name: this.name, ts: Date.now() })
@@ -244,6 +297,8 @@ export class MeetRtdbSession {
   private async leaveRoomLocal(notify: boolean) {
     const roomId = this.roomId
     this.roomId = null
+    this.matched = false
+    this.myWaitTs = null
     this.clearListeners()
     await this.clearDisconnect()
     if (!roomId) return
