@@ -1,0 +1,64 @@
+# Nuxt
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+
+# Node
+node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+firebase-debug.log*
+firestore-debug.log*
+
+# OS / IDE
+.DS_Store
+.fleet
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Env & secrets — NEVER push
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+firebase-service-account.json
+google-services.json
+GoogleService-Info.plist
+
+# Firebase local
+.firebase/
+.firebaserc.local
+
+# Agent / AI tooling — NEVER push
+.cursor/
+.agents/
+.agent/
+.claude/
+.codex/
+.continue/
+.windsurf/
+.gemini/
+AGENTS.md
+CLAUDE.md
+.cursorrules
+*.agent.md
+agent-transcripts/
+mcps/
+
+# Temp / coverage
+coverage/
+tmp/
+temp/
+*.local
